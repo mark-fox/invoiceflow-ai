@@ -1,0 +1,27 @@
+from enum import Enum
+
+
+class InvoiceStatus(str, Enum):
+    UPLOADED = "UPLOADED"
+    PROCESSING = "PROCESSING"
+    CLEARED = "CLEARED"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    FAILED = "FAILED"
+
+
+class ExceptionType(str, Enum):
+    AMOUNT_MISMATCH = "AMOUNT_MISMATCH"
+    UNKNOWN_PO = "UNKNOWN_PO"
+    DUPLICATE_INVOICE = "DUPLICATE_INVOICE"
+    LOW_CONFIDENCE = "LOW_CONFIDENCE"
+    MISSING_FIELD = "MISSING_FIELD"
+
+
+class PurchaseOrderStatus(str, Enum):
+    OPEN = "OPEN"
+    PARTIALLY_INVOICED = "PARTIALLY_INVOICED"
+    CLOSED = "CLOSED"
+    CANCELLED = "CANCELLED"
+

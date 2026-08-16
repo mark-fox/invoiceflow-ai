@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-invoiceflow}
+      POSTGRES_USER: ${POSTGRES_USER:-invoiceflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-invoiceflow}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports: ["5432:5432"]
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-invoiceflow}:${POSTGRES_PASSWORD:-invoiceflow}@db:5432/${POSTGRES_DB:-invoiceflow}
+      FRONTEND_ORIGIN: http://localhost:5173
+      UPLOAD_DIR: /app/uploads
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+    volumes:
+      - ./backend:/app
+      - invoice_uploads:/app/uploads
+    ports: ["8000:8000"]
+    depends_on:
+      db: {condition: service_healthy}
+  frontend:
+    build: ./frontend
+    environment:
+      VITE_API_URL: /api
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    ports: ["5173:5173"]
+    depends_on: [backend]
+volumes:
+  postgres_data:
+  invoice_uploads:
+  frontend_node_modules:
+

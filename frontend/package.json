@@ -1,0 +1,9 @@
+{
+  "name": "invoiceflow-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {"dev": "vite --host 0.0.0.0", "build": "tsc --noEmit && vite build", "lint": "eslint ."},
+  "dependencies": {"@vitejs/plugin-react": "latest", "lucide-react": "latest", "react": "latest", "react-dom": "latest", "react-router-dom": "latest"},
+  "devDependencies": {"@eslint/js": "latest", "@types/react": "latest", "@types/react-dom": "latest", "eslint": "latest", "eslint-plugin-react-hooks": "latest", "eslint-plugin-react-refresh": "latest", "globals": "latest", "typescript": "latest", "typescript-eslint": "latest", "vite": "latest"}
+}

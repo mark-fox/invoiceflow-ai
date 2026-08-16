@@ -1,0 +1,2 @@
+import {useEffect,useState} from 'react'
+export function useLoad<T>(loader:()=>Promise<T>,deps:unknown[]=[]){const [data,setData]=useState<T|null>(null);const [error,setError]=useState('');const [loading,setLoading]=useState(true);useEffect(()=>{let active=true;setLoading(true);loader().then(v=>active&&setData(v)).catch(e=>active&&setError(e.message)).finally(()=>active&&setLoading(false));return()=>{active=false}},deps);return{data,error,loading,setData}}
