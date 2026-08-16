@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import ExceptionType, InvoiceStatus, PurchaseOrderStatus
 
@@ -49,14 +49,13 @@ class AuditEventOut(ORMModel):
     id: int
     event_type: str
     message: str
-    event_metadata: dict[str, Any] | None
+    metadata: dict[str, Any] | None = Field(validation_alias="event_metadata")
     created_at: datetime
 
 
 class InvoiceDetail(InvoiceListItem):
     po_number: str | None
     invoice_date: date | None
-    file_path: str
     extraction_confidence: Decimal | None
     updated_at: datetime
     purchase_order: PurchaseOrderOut | None = None
@@ -72,4 +71,3 @@ class DashboardSummary(BaseModel):
     rejected: int
     failed: int
     recent_invoices: list[InvoiceListItem]
-

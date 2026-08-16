@@ -1,7 +1,11 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.models import Invoice, InvoiceStatus, PurchaseOrder
 from app.schemas.models import InvoiceDetail, InvoiceListItem
@@ -29,22 +33,35 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db)) -> InvoiceDetail
     return _detail(db, invoice_id)
 
 
+@router.get("/{invoice_id}/file", response_class=FileResponse)
+def download_invoice_file(invoice_id: int, db: Session = Depends(get_db)) -> FileResponse:
+    invoice = _get(db, invoice_id)
+    upload_root = settings.upload_dir.resolve()
+    file_path = Path(invoice.file_path).resolve()
+    if not file_path.is_relative_to(upload_root) or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Invoice file is not available.")
+    return FileResponse(file_path, filename=file_path.name)
+
+
 @router.post("/{invoice_id}/approve", response_model=InvoiceDetail)
 def approve_invoice(invoice_id: int, db: Session = Depends(get_db)) -> InvoiceDetail:
-    invoice = _get(db, invoice_id)
+    invoice = _get(db, invoice_id, for_update=True)
     review_invoice(db, invoice, InvoiceStatus.APPROVED)
     return _detail(db, invoice_id)
 
 
 @router.post("/{invoice_id}/reject", response_model=InvoiceDetail)
 def reject_invoice(invoice_id: int, db: Session = Depends(get_db)) -> InvoiceDetail:
-    invoice = _get(db, invoice_id)
+    invoice = _get(db, invoice_id, for_update=True)
     review_invoice(db, invoice, InvoiceStatus.REJECTED)
     return _detail(db, invoice_id)
 
 
-def _get(db: Session, invoice_id: int) -> Invoice:
-    invoice = db.get(Invoice, invoice_id)
+def _get(db: Session, invoice_id: int, *, for_update: bool = False) -> Invoice:
+    query = select(Invoice).where(Invoice.id == invoice_id)
+    if for_update:
+        query = query.with_for_update()
+    invoice = db.scalar(query)
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found.")
     return invoice

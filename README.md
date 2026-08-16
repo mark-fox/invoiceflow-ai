@@ -54,6 +54,7 @@ To stop the application, run `docker compose down`. Add `-v` only when you inten
 - `GET /api/invoices?status=NEEDS_REVIEW`
 - `POST /api/invoices/upload`
 - `GET /api/invoices/{id}`
+- `GET /api/invoices/{id}/file`
 - `POST /api/invoices/{id}/approve`
 - `POST /api/invoices/{id}/reject`
 - `GET /api/purchase-orders`
