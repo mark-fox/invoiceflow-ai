@@ -5,7 +5,8 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models import AuditEvent, Invoice, InvoiceStatus
+from app.models import AuditEvent, Invoice, InvoiceException, InvoiceStatus
+from app.schemas.models import ProcessingResultIn
 
 ALLOWED_CONTENT_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp", "image/tiff"}
 ALLOWED_EXTENSIONS = {
@@ -79,6 +80,56 @@ def start_invoice_processing(db: Session, invoice: Invoice) -> Invoice:
     )
     db.commit()
     db.refresh(invoice)
+    return invoice
+
+
+def apply_processing_result(
+    db: Session, invoice: Invoice, result: ProcessingResultIn
+) -> Invoice:
+    if invoice.status != InvoiceStatus.PROCESSING:
+        raise HTTPException(
+            status_code=409,
+            detail="Processing results can only be applied to invoices currently processing.",
+        )
+
+    invoice.invoice_number = result.invoice_number
+    invoice.vendor_name = result.vendor_name
+    invoice.po_number = result.po_number
+    invoice.invoice_date = result.invoice_date
+    invoice.total_amount = result.total_amount
+    invoice.extraction_confidence = result.extraction_confidence
+    invoice.status = result.status
+
+    db.add_all(
+        [
+            InvoiceException(
+                invoice_id=invoice.id,
+                exception_type=processing_exception.exception_type,
+                description=processing_exception.description,
+                expected_value=processing_exception.expected_value,
+                actual_value=processing_exception.actual_value,
+            )
+            for processing_exception in result.exceptions
+        ]
+    )
+    db.add(
+        AuditEvent(
+            invoice_id=invoice.id,
+            event_type="INVOICE_PROCESSING_COMPLETED",
+            message=f"Invoice processing completed with status {result.status.value}.",
+            event_metadata={
+                "resulting_status": result.status.value,
+                "exception_count": len(result.exceptions),
+            },
+        )
+    )
+
+    try:
+        db.commit()
+        db.refresh(invoice)
+    except Exception:
+        db.rollback()
+        raise
     return invoice
 
 

@@ -1,16 +1,25 @@
 from io import BytesIO
 from pathlib import Path
+from datetime import date
+from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException, UploadFile
+from pydantic import ValidationError
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from starlette.datastructures import Headers
 
 from app.core.config import settings
 from app.db.session import Base
-from app.models import AuditEvent, Invoice, InvoiceStatus
-from app.services.invoices import review_invoice, save_upload, start_invoice_processing
+from app.models import AuditEvent, ExceptionType, Invoice, InvoiceException, InvoiceStatus
+from app.schemas.models import ProcessingExceptionIn, ProcessingResultIn
+from app.services.invoices import (
+    apply_processing_result,
+    review_invoice,
+    save_upload,
+    start_invoice_processing,
+)
 
 
 @pytest.fixture
@@ -23,6 +32,21 @@ def db() -> Session:
 
 def upload(filename: str, content_type: str, content: bytes) -> UploadFile:
     return UploadFile(filename=filename, file=BytesIO(content), headers=Headers({"content-type": content_type}))
+
+
+def processing_result(**overrides) -> ProcessingResultIn:
+    values = {
+        "invoice_number": "INV-2026-4001",
+        "vendor_name": "Northstar Office Supply",
+        "po_number": "PO-2026-1048",
+        "invoice_date": date(2026, 8, 15),
+        "total_amount": Decimal("4280.50"),
+        "extraction_confidence": Decimal("0.98"),
+        "status": InvoiceStatus.CLEARED,
+        "exceptions": [],
+    }
+    values.update(overrides)
+    return ProcessingResultIn(**values)
 
 
 def test_upload_persists_invoice_and_audit_event(db: Session, tmp_path, monkeypatch) -> None:
@@ -101,3 +125,129 @@ def test_start_processing_rejects_non_uploaded_statuses(
 
     assert error.value.status_code == 409
     assert invoice.status == invoice_status
+
+
+def test_apply_processing_result_clears_invoice_and_saves_extracted_fields(
+    db: Session,
+) -> None:
+    invoice = Invoice(file_path="/tmp/processing.pdf", status=InvoiceStatus.PROCESSING)
+    db.add(invoice)
+    db.commit()
+
+    updated_invoice = apply_processing_result(db, invoice, processing_result())
+
+    assert updated_invoice.status == InvoiceStatus.CLEARED
+    assert updated_invoice.invoice_number == "INV-2026-4001"
+    assert updated_invoice.vendor_name == "Northstar Office Supply"
+    assert updated_invoice.po_number == "PO-2026-1048"
+    assert updated_invoice.invoice_date == date(2026, 8, 15)
+    assert updated_invoice.total_amount == Decimal("4280.50")
+    assert updated_invoice.extraction_confidence == Decimal("0.98")
+    event = db.scalar(
+        select(AuditEvent).where(
+            AuditEvent.invoice_id == invoice.id,
+            AuditEvent.event_type == "INVOICE_PROCESSING_COMPLETED",
+        )
+    )
+    assert event is not None
+    assert event.event_metadata["resulting_status"] == "CLEARED"
+    assert event.event_metadata["exception_count"] == 0
+
+
+def test_apply_processing_result_persists_review_exceptions(db: Session) -> None:
+    invoice = Invoice(file_path="/tmp/review.pdf", status=InvoiceStatus.PROCESSING)
+    db.add(invoice)
+    db.commit()
+    result = processing_result(
+        status=InvoiceStatus.NEEDS_REVIEW,
+        exceptions=[
+            ProcessingExceptionIn(
+                exception_type=ExceptionType.AMOUNT_MISMATCH,
+                description="Invoice amount differs from the purchase order.",
+                expected_value="4280.50",
+                actual_value="4380.50",
+            )
+        ],
+    )
+
+    apply_processing_result(db, invoice, result)
+
+    assert invoice.status == InvoiceStatus.NEEDS_REVIEW
+    saved_exception = db.scalar(
+        select(InvoiceException).where(InvoiceException.invoice_id == invoice.id)
+    )
+    assert saved_exception is not None
+    assert saved_exception.exception_type == ExceptionType.AMOUNT_MISMATCH
+    assert saved_exception.expected_value == "4280.50"
+    assert saved_exception.actual_value == "4380.50"
+    event = db.scalar(
+        select(AuditEvent).where(
+            AuditEvent.invoice_id == invoice.id,
+            AuditEvent.event_type == "INVOICE_PROCESSING_COMPLETED",
+        )
+    )
+    assert event is not None
+    assert event.event_metadata == {
+        "resulting_status": "NEEDS_REVIEW",
+        "exception_count": 1,
+    }
+
+
+def test_apply_processing_result_can_fail_processing(db: Session) -> None:
+    invoice = Invoice(file_path="/tmp/failed.pdf", status=InvoiceStatus.PROCESSING)
+    db.add(invoice)
+    db.commit()
+
+    apply_processing_result(
+        db,
+        invoice,
+        processing_result(
+            status=InvoiceStatus.FAILED,
+            invoice_number=None,
+            vendor_name=None,
+            po_number=None,
+            invoice_date=None,
+            total_amount=None,
+            extraction_confidence=None,
+        ),
+    )
+
+    assert invoice.status == InvoiceStatus.FAILED
+
+
+def test_apply_processing_result_rejects_invalid_lifecycle_and_repeat(
+    db: Session,
+) -> None:
+    uploaded_invoice = Invoice(
+        file_path="/tmp/uploaded-result.pdf", status=InvoiceStatus.UPLOADED
+    )
+    processing_invoice = Invoice(
+        file_path="/tmp/completed-result.pdf", status=InvoiceStatus.PROCESSING
+    )
+    db.add_all([uploaded_invoice, processing_invoice])
+    db.commit()
+
+    with pytest.raises(HTTPException) as uploaded_error:
+        apply_processing_result(db, uploaded_invoice, processing_result())
+    assert uploaded_error.value.status_code == 409
+
+    apply_processing_result(db, processing_invoice, processing_result())
+    with pytest.raises(HTTPException) as repeat_error:
+        apply_processing_result(db, processing_invoice, processing_result())
+    assert repeat_error.value.status_code == 409
+
+
+@pytest.mark.parametrize("invalid_status", [InvoiceStatus.APPROVED, InvoiceStatus.REJECTED])
+def test_processing_result_rejects_manual_review_statuses(
+    invalid_status: InvoiceStatus,
+) -> None:
+    with pytest.raises(ValidationError):
+        processing_result(status=invalid_status)
+
+
+@pytest.mark.parametrize("invalid_confidence", [Decimal("-0.01"), Decimal("1.01")])
+def test_processing_result_rejects_out_of_range_confidence(
+    invalid_confidence: Decimal,
+) -> None:
+    with pytest.raises(ValidationError):
+        processing_result(extraction_confidence=invalid_confidence)

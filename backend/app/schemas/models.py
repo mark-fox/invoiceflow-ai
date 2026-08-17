@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import ExceptionType, InvoiceStatus, PurchaseOrderStatus
 
@@ -61,6 +61,40 @@ class InvoiceDetail(InvoiceListItem):
     purchase_order: PurchaseOrderOut | None = None
     exceptions: list[InvoiceExceptionOut]
     audit_events: list[AuditEventOut]
+
+
+class ProcessingExceptionIn(BaseModel):
+    exception_type: ExceptionType
+    description: str
+    expected_value: str | None = None
+    actual_value: str | None = None
+
+
+class ProcessingResultIn(BaseModel):
+    invoice_number: str | None
+    vendor_name: str | None
+    po_number: str | None
+    invoice_date: date | None
+    total_amount: Decimal | None
+    extraction_confidence: Decimal | None = Field(ge=0, le=1)
+    status: InvoiceStatus
+    exceptions: list[ProcessingExceptionIn] = Field(default_factory=list)
+
+    @field_validator("status")
+    @classmethod
+    def validate_terminal_processing_status(
+        cls, value: InvoiceStatus
+    ) -> InvoiceStatus:
+        allowed_statuses = {
+            InvoiceStatus.CLEARED,
+            InvoiceStatus.NEEDS_REVIEW,
+            InvoiceStatus.FAILED,
+        }
+        if value not in allowed_statuses:
+            raise ValueError(
+                "Processing result status must be CLEARED, NEEDS_REVIEW, or FAILED."
+            )
+        return value
 
 
 class DashboardSummary(BaseModel):

@@ -8,8 +8,13 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.db.session import get_db
 from app.models import Invoice, InvoiceStatus, PurchaseOrder
-from app.schemas.models import InvoiceDetail, InvoiceListItem
-from app.services.invoices import review_invoice, save_upload, start_invoice_processing
+from app.schemas.models import InvoiceDetail, InvoiceListItem, ProcessingResultIn
+from app.services.invoices import (
+    apply_processing_result,
+    review_invoice,
+    save_upload,
+    start_invoice_processing,
+)
 
 router = APIRouter()
 
@@ -47,6 +52,17 @@ def download_invoice_file(invoice_id: int, db: Session = Depends(get_db)) -> Fil
 def start_processing(invoice_id: int, db: Session = Depends(get_db)) -> InvoiceDetail:
     invoice = _get(db, invoice_id, for_update=True)
     start_invoice_processing(db, invoice)
+    return _detail(db, invoice_id)
+
+
+@router.post("/{invoice_id}/processing/result", response_model=InvoiceDetail)
+def submit_processing_result(
+    invoice_id: int,
+    result: ProcessingResultIn,
+    db: Session = Depends(get_db),
+) -> InvoiceDetail:
+    invoice = _get(db, invoice_id, for_update=True)
+    apply_processing_result(db, invoice, result)
     return _detail(db, invoice_id)
 
 
