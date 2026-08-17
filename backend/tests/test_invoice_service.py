@@ -10,7 +10,7 @@ from starlette.datastructures import Headers
 from app.core.config import settings
 from app.db.session import Base
 from app.models import AuditEvent, Invoice, InvoiceStatus
-from app.services.invoices import review_invoice, save_upload
+from app.services.invoices import review_invoice, save_upload, start_invoice_processing
 
 
 @pytest.fixture
@@ -61,3 +61,43 @@ def test_review_creates_audit_event_and_prevents_second_decision(db: Session) ->
     with pytest.raises(HTTPException) as error:
         review_invoice(db, invoice, InvoiceStatus.REJECTED)
     assert error.value.status_code == 409
+
+
+def test_start_processing_updates_uploaded_invoice_and_records_audit_event(db: Session) -> None:
+    invoice = Invoice(file_path="/tmp/uploaded.pdf", status=InvoiceStatus.UPLOADED)
+    db.add(invoice)
+    db.commit()
+
+    updated_invoice = start_invoice_processing(db, invoice)
+
+    assert updated_invoice.status == InvoiceStatus.PROCESSING
+    event = db.scalar(
+        select(AuditEvent).where(
+            AuditEvent.invoice_id == invoice.id,
+            AuditEvent.event_type == "INVOICE_PROCESSING_STARTED",
+        )
+    )
+    assert event is not None
+    assert event.message == "Automated invoice processing started."
+
+    with pytest.raises(HTTPException) as error:
+        start_invoice_processing(db, invoice)
+    assert error.value.status_code == 409
+
+
+@pytest.mark.parametrize(
+    "invoice_status",
+    [InvoiceStatus.NEEDS_REVIEW, InvoiceStatus.APPROVED, InvoiceStatus.FAILED],
+)
+def test_start_processing_rejects_non_uploaded_statuses(
+    db: Session, invoice_status: InvoiceStatus
+) -> None:
+    invoice = Invoice(file_path="/tmp/not-uploaded.pdf", status=invoice_status)
+    db.add(invoice)
+    db.commit()
+
+    with pytest.raises(HTTPException) as error:
+        start_invoice_processing(db, invoice)
+
+    assert error.value.status_code == 409
+    assert invoice.status == invoice_status

@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.models import Invoice, InvoiceStatus, PurchaseOrder
 from app.schemas.models import InvoiceDetail, InvoiceListItem
-from app.services.invoices import review_invoice, save_upload
+from app.services.invoices import review_invoice, save_upload, start_invoice_processing
 
 router = APIRouter()
 
@@ -41,6 +41,13 @@ def download_invoice_file(invoice_id: int, db: Session = Depends(get_db)) -> Fil
     if not file_path.is_relative_to(upload_root) or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Invoice file is not available.")
     return FileResponse(file_path, filename=file_path.name)
+
+
+@router.post("/{invoice_id}/processing/start", response_model=InvoiceDetail)
+def start_processing(invoice_id: int, db: Session = Depends(get_db)) -> InvoiceDetail:
+    invoice = _get(db, invoice_id, for_update=True)
+    start_invoice_processing(db, invoice)
+    return _detail(db, invoice_id)
 
 
 @router.post("/{invoice_id}/approve", response_model=InvoiceDetail)

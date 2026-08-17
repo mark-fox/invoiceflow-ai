@@ -66,6 +66,22 @@ def review_invoice(db: Session, invoice: Invoice, new_status: InvoiceStatus) -> 
     return invoice
 
 
+def start_invoice_processing(db: Session, invoice: Invoice) -> Invoice:
+    if invoice.status != InvoiceStatus.UPLOADED:
+        raise HTTPException(status_code=409, detail="Only uploaded invoices can start processing.")
+    invoice.status = InvoiceStatus.PROCESSING
+    db.add(
+        AuditEvent(
+            invoice_id=invoice.id,
+            event_type="INVOICE_PROCESSING_STARTED",
+            message="Automated invoice processing started.",
+        )
+    )
+    db.commit()
+    db.refresh(invoice)
+    return invoice
+
+
 def _has_expected_signature(content: bytes, content_type: str) -> bool:
     if content_type == "application/pdf":
         return content.startswith(b"%PDF-")
