@@ -17,7 +17,7 @@ This phase intentionally provides only the conventional application foundation:
 
 ## Stack
 
-React, TypeScript, Vite, FastAPI, PostgreSQL, SQLAlchemy 2, Alembic, and Docker Compose.
+React, TypeScript, Vite, FastAPI, PostgreSQL, SQLAlchemy 2, Alembic, n8n, and Docker Compose.
 
 ## Project structure
 
@@ -43,6 +43,9 @@ On PowerShell, use `Copy-Item .env.example .env` instead of `cp` if preferred.
 - Application: http://localhost:5173
 - API documentation: http://localhost:8000/docs
 - API health check: http://localhost:8000/health
+- n8n: http://localhost:5678
+
+n8n stores its local instance data in the persistent `n8n_data` Docker volume. From an n8n workflow, the FastAPI service is reachable on the shared Compose network at `http://backend:8000`. No workflows or application integrations are configured yet.
 
 Alembic migrations run automatically when the backend starts. Demo data is inserted only when the vendor table is empty. Set `SEED_DEMO_DATA=false` in `.env` to disable it.
 
