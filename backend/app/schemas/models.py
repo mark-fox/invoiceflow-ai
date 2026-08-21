@@ -63,6 +63,11 @@ class InvoiceDetail(InvoiceListItem):
     audit_events: list[AuditEventOut]
 
 
+class DuplicateCheckOut(BaseModel):
+    is_duplicate: bool
+    matching_invoice_id: int | None = None
+
+
 class ProcessingExceptionIn(BaseModel):
     exception_type: ExceptionType
     description: str

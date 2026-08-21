@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.db.session import get_db
 from app.models import Invoice, InvoiceStatus, PurchaseOrder
-from app.schemas.models import InvoiceDetail, InvoiceListItem, ProcessingResultIn
+from app.schemas.models import (
+    DuplicateCheckOut,
+    InvoiceDetail,
+    InvoiceListItem,
+    ProcessingResultIn,
+)
 from app.services.invoices import (
     apply_processing_result,
     review_invoice,
@@ -31,6 +36,26 @@ def list_invoices(status: InvoiceStatus | None = None, db: Session = Depends(get
 def upload_invoice(file: UploadFile = File(...), db: Session = Depends(get_db)) -> InvoiceDetail:
     invoice = save_upload(db, file)
     return _detail(db, invoice.id)
+
+
+@router.get("/duplicate-check", response_model=DuplicateCheckOut)
+def check_duplicate_invoice(
+    invoice_number: str,
+    vendor_name: str,
+    exclude_invoice_id: int | None = None,
+    db: Session = Depends(get_db),
+) -> DuplicateCheckOut:
+    query = select(Invoice).where(
+        Invoice.invoice_number == invoice_number,
+        Invoice.vendor_name == vendor_name,
+    )
+    if exclude_invoice_id is not None:
+        query = query.where(Invoice.id != exclude_invoice_id)
+    matching_invoice = db.scalar(query.order_by(Invoice.id.asc()).limit(1))
+    return DuplicateCheckOut(
+        is_duplicate=matching_invoice is not None,
+        matching_invoice_id=matching_invoice.id if matching_invoice else None,
+    )
 
 
 @router.get("/{invoice_id}", response_model=InvoiceDetail)
