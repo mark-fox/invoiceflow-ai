@@ -580,12 +580,21 @@
               "fileName": "={{ $binary.data.fileName }}"
             },
             {
-              "content": "Extract the following fields from the attached invoice:\n\n- vendor_name\n- invoice_number\n- po_number\n- invoice_date\n- total_amount\n\nReturn only JSON in exactly this shape:\n\n{\n  \"vendor_name\": string or null,\n  \"invoice_number\": string or null,\n  \"po_number\": string or null,\n  \"invoice_date\": \"YYYY-MM-DD\" or null,\n  \"total_amount\": number or null,\n  \"extraction_confidence\": number between 0 and 1\n}\n\nRules:\n- Do not include markdown.\n- Do not include explanations.\n- Do not invent values that are not visible in the invoice.\n- Use null when a field cannot be determined.\n- extraction_confidence should reflect how confident you are in the overall extraction."
+              "content": "Extract these fields from the attached invoice:\n\n- vendor_name\n- invoice_number\n- po_number\n- invoice_date\n- total_amount\n\nRules:\n- Do not invent values that are not visible in the invoice.\n- Use null when a field cannot be determined.\n- invoice_date must use YYYY-MM-DD when present.\n- extraction_confidence must reflect your overall confidence in the extraction."
             }
           ]
         },
         "builtInTools": {},
-        "options": {}
+        "options": {
+          "textFormat": {
+            "textOptions": {
+              "type": "json_schema",
+              "name": "invoice_extraction",
+              "schema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"vendor_name\": {\n      \"type\": [\"string\", \"null\"]\n    },\n    \"invoice_number\": {\n      \"type\": [\"string\", \"null\"]\n    },\n    \"po_number\": {\n      \"type\": [\"string\", \"null\"]\n    },\n    \"invoice_date\": {\n      \"type\": [\"string\", \"null\"]\n    },\n    \"total_amount\": {\n      \"type\": [\"number\", \"null\"]\n    },\n    \"extraction_confidence\": {\n      \"type\": \"number\",\n      \"minimum\": 0,\n      \"maximum\": 1\n    }\n  },\n  \"required\": [\n    \"vendor_name\",\n    \"invoice_number\",\n    \"po_number\",\n    \"invoice_date\",\n    \"total_amount\",\n    \"extraction_confidence\"\n  ],\n  \"additionalProperties\": false\n}",
+              "strict": true
+            }
+          }
+        }
       },
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 2.3,
@@ -605,7 +614,7 @@
     {
       "parameters": {
         "mode": "raw",
-        "jsonOutput": "={{ JSON.parse($json.output[0].content[0].text) }}",
+        "jsonOutput": "={{ $json.output[0].content[0].text }}",
         "options": {}
       },
       "type": "n8n-nodes-base.set",
@@ -898,7 +907,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "6c7fab8f-d10d-4485-97df-aead912f9ef3",
+  "versionId": "801d5681-0bb8-407e-9d28-7e3d628e5d0e",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "097f76c6f3e7defa2cab1af64a4a5a8aeeecd466a30433ef336c127017189f01"
