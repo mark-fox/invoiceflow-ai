@@ -604,6 +604,8 @@
       ],
       "id": "a984974b-e4fa-45bc-8b7e-54254dd75893",
       "name": "Extract Invoice with OpenAI",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
       "credentials": {
         "openAiApi": {
           "id": "1aWgKbvwHuqnrkjP",
@@ -1004,7 +1006,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "e6a185e3-f9ab-4256-b635-ebedc7c9f961",
+  "versionId": "4293cba0-5cb8-4196-91e3-083935f2df00",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "097f76c6f3e7defa2cab1af64a4a5a8aeeecd466a30433ef336c127017189f01"
