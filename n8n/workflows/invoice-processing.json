@@ -63,6 +63,15 @@
       "parameters": {
         "method": "POST",
         "url": "=http://backend:8000/api/invoices/{{ $json.id }}/processing/start",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $execution.id }}"
+            }
+          ]
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -213,6 +222,15 @@
       "parameters": {
         "method": "POST",
         "url": "=http://backend:8000/api/invoices/{{ $('Start Processing').item.json.id }}/processing/result",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $execution.id }}"
+            }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ $json }}",
@@ -246,6 +264,15 @@
       "parameters": {
         "method": "POST",
         "url": "=http://backend:8000/api/invoices/{{ $('Start Processing').item.json.id }}/processing/result",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $execution.id }}"
+            }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ $json }}",
@@ -279,6 +306,15 @@
       "parameters": {
         "method": "POST",
         "url": "=http://backend:8000/api/invoices/{{ $('Start Processing').item.json.id }}/processing/result",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $execution.id }}"
+            }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ $json }}",
@@ -351,6 +387,15 @@
       "parameters": {
         "method": "POST",
         "url": "=http://backend:8000/api/invoices/{{ $('Start Processing').item.json.id }}/processing/result",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $execution.id }}"
+            }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ $json }}",
@@ -432,6 +477,15 @@
       "parameters": {
         "method": "POST",
         "url": "=http://backend:8000/api/invoices/{{ $('Start Processing').item.json.id }}/processing/result",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $execution.id }}"
+            }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ $json }}",
@@ -530,6 +584,15 @@
       "parameters": {
         "method": "POST",
         "url": "=http://backend:8000/api/invoices/{{ $('Start Processing').item.json.id }}/processing/result",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $execution.id }}"
+            }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ $json }}",
@@ -648,6 +711,15 @@
       "parameters": {
         "method": "POST",
         "url": "=http://backend:8000/api/invoices/{{ $('Start Processing').item.json.id }}/processing/result",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $execution.id }}"
+            }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ $json }}",
@@ -1006,7 +1078,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "4293cba0-5cb8-4196-91e3-083935f2df00",
+  "versionId": "295fc0de-3f8d-4949-89f2-f8df293c659e",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "097f76c6f3e7defa2cab1af64a4a5a8aeeecd466a30433ef336c127017189f01"
