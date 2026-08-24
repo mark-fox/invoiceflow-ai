@@ -1,8 +1,10 @@
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.api.routes.invoices import check_duplicate_invoice
+from app.api.routes.invoices import check_duplicate_invoice, router
 from app.db.session import Base
 from app.models import Invoice, InvoiceStatus
 
@@ -13,6 +15,13 @@ def db() -> Session:
     Base.metadata.create_all(engine)
     with Session(engine, expire_on_commit=False) as session:
         yield session
+
+
+@pytest.fixture
+def api_client() -> TestClient:
+    app = FastAPI()
+    app.include_router(router, prefix="/api/invoices")
+    return TestClient(app)
 
 
 def add_invoice(
@@ -78,3 +87,34 @@ def test_duplicate_check_returns_false_when_no_invoice_matches(db: Session) -> N
 
     assert result.is_duplicate is False
     assert result.matching_invoice_id is None
+
+
+@pytest.mark.parametrize(
+    ("path", "json_body"),
+    [
+        ("/api/invoices/1/processing/start", None),
+        (
+            "/api/invoices/1/processing/result",
+            {
+                "invoice_number": None,
+                "vendor_name": None,
+                "po_number": None,
+                "invoice_date": None,
+                "total_amount": None,
+                "extraction_confidence": None,
+                "status": "FAILED",
+                "exceptions": [],
+            },
+        ),
+    ],
+)
+def test_automation_mutations_require_idempotency_key(
+    api_client: TestClient, path: str, json_body: dict | None
+) -> None:
+    response = api_client.post(path, json=json_body)
+
+    assert response.status_code == 422
+    assert any(
+        error["loc"] == ["header", "Idempotency-Key"]
+        for error in response.json()["detail"]
+    )

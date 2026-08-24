@@ -67,25 +67,55 @@ def review_invoice(db: Session, invoice: Invoice, new_status: InvoiceStatus) -> 
     return invoice
 
 
-def start_invoice_processing(db: Session, invoice: Invoice) -> Invoice:
+def start_invoice_processing(
+    db: Session, invoice: Invoice, idempotency_key: str
+) -> Invoice:
+    if invoice.status == InvoiceStatus.PROCESSING:
+        if invoice.processing_idempotency_key == idempotency_key:
+            return invoice
+        raise HTTPException(
+            status_code=409,
+            detail="Invoice processing was already started with a different idempotency key.",
+        )
     if invoice.status != InvoiceStatus.UPLOADED:
         raise HTTPException(status_code=409, detail="Only uploaded invoices can start processing.")
+    invoice.processing_idempotency_key = idempotency_key
     invoice.status = InvoiceStatus.PROCESSING
     db.add(
         AuditEvent(
             invoice_id=invoice.id,
             event_type="INVOICE_PROCESSING_STARTED",
             message="Automated invoice processing started.",
+            event_metadata={"idempotency_key": idempotency_key},
         )
     )
-    db.commit()
-    db.refresh(invoice)
+    try:
+        db.commit()
+        db.refresh(invoice)
+    except Exception:
+        db.rollback()
+        raise
     return invoice
 
 
 def apply_processing_result(
-    db: Session, invoice: Invoice, result: ProcessingResultIn
+    db: Session,
+    invoice: Invoice,
+    result: ProcessingResultIn,
+    idempotency_key: str,
 ) -> Invoice:
+    automation_terminal_statuses = {
+        InvoiceStatus.CLEARED,
+        InvoiceStatus.NEEDS_REVIEW,
+        InvoiceStatus.FAILED,
+    }
+    if invoice.processing_idempotency_key != idempotency_key:
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency key does not match the active invoice processing run.",
+        )
+    if invoice.status in automation_terminal_statuses:
+        return invoice
     if invoice.status != InvoiceStatus.PROCESSING:
         raise HTTPException(
             status_code=409,

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -74,9 +74,15 @@ def download_invoice_file(invoice_id: int, db: Session = Depends(get_db)) -> Fil
 
 
 @router.post("/{invoice_id}/processing/start", response_model=InvoiceDetail)
-def start_processing(invoice_id: int, db: Session = Depends(get_db)) -> InvoiceDetail:
+def start_processing(
+    invoice_id: int,
+    idempotency_key: str = Header(
+        ..., alias="Idempotency-Key", min_length=1, max_length=255
+    ),
+    db: Session = Depends(get_db),
+) -> InvoiceDetail:
     invoice = _get(db, invoice_id, for_update=True)
-    start_invoice_processing(db, invoice)
+    start_invoice_processing(db, invoice, idempotency_key)
     return _detail(db, invoice_id)
 
 
@@ -84,10 +90,13 @@ def start_processing(invoice_id: int, db: Session = Depends(get_db)) -> InvoiceD
 def submit_processing_result(
     invoice_id: int,
     result: ProcessingResultIn,
+    idempotency_key: str = Header(
+        ..., alias="Idempotency-Key", min_length=1, max_length=255
+    ),
     db: Session = Depends(get_db),
 ) -> InvoiceDetail:
     invoice = _get(db, invoice_id, for_update=True)
-    apply_processing_result(db, invoice, result)
+    apply_processing_result(db, invoice, result, idempotency_key)
     return _detail(db, invoice_id)
 
 

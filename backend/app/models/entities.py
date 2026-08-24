@@ -38,6 +38,7 @@ class Invoice(Base):
     total_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     file_path: Mapped[str] = mapped_column(String(500))
     extraction_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    processing_idempotency_key: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[InvoiceStatus] = mapped_column(Enum(InvoiceStatus, name="invoice_status"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -66,4 +67,3 @@ class AuditEvent(Base):
     event_metadata: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     invoice: Mapped[Invoice] = relationship(back_populates="audit_events")
-

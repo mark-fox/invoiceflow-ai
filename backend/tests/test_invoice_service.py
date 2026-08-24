@@ -92,9 +92,10 @@ def test_start_processing_updates_uploaded_invoice_and_records_audit_event(db: S
     db.add(invoice)
     db.commit()
 
-    updated_invoice = start_invoice_processing(db, invoice)
+    updated_invoice = start_invoice_processing(db, invoice, "execution-1001")
 
     assert updated_invoice.status == InvoiceStatus.PROCESSING
+    assert updated_invoice.processing_idempotency_key == "execution-1001"
     event = db.scalar(
         select(AuditEvent).where(
             AuditEvent.invoice_id == invoice.id,
@@ -103,9 +104,28 @@ def test_start_processing_updates_uploaded_invoice_and_records_audit_event(db: S
     )
     assert event is not None
     assert event.message == "Automated invoice processing started."
+    assert event.event_metadata == {"idempotency_key": "execution-1001"}
+
+    replayed_invoice = start_invoice_processing(db, invoice, "execution-1001")
+    start_events = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.invoice_id == invoice.id,
+            AuditEvent.event_type == "INVOICE_PROCESSING_STARTED",
+        )
+    ).all()
+    assert replayed_invoice.id == invoice.id
+    assert len(start_events) == 1
+
+
+def test_start_processing_rejects_different_idempotency_key(db: Session) -> None:
+    invoice = Invoice(file_path="/tmp/uploaded.pdf", status=InvoiceStatus.UPLOADED)
+    db.add(invoice)
+    db.commit()
+    start_invoice_processing(db, invoice, "execution-1002")
 
     with pytest.raises(HTTPException) as error:
-        start_invoice_processing(db, invoice)
+        start_invoice_processing(db, invoice, "different-execution")
+
     assert error.value.status_code == 409
 
 
@@ -121,7 +141,7 @@ def test_start_processing_rejects_non_uploaded_statuses(
     db.commit()
 
     with pytest.raises(HTTPException) as error:
-        start_invoice_processing(db, invoice)
+        start_invoice_processing(db, invoice, "execution-invalid-status")
 
     assert error.value.status_code == 409
     assert invoice.status == invoice_status
@@ -130,11 +150,17 @@ def test_start_processing_rejects_non_uploaded_statuses(
 def test_apply_processing_result_clears_invoice_and_saves_extracted_fields(
     db: Session,
 ) -> None:
-    invoice = Invoice(file_path="/tmp/processing.pdf", status=InvoiceStatus.PROCESSING)
+    invoice = Invoice(
+        file_path="/tmp/processing.pdf",
+        status=InvoiceStatus.UPLOADED,
+    )
     db.add(invoice)
     db.commit()
+    start_invoice_processing(db, invoice, "execution-cleared")
 
-    updated_invoice = apply_processing_result(db, invoice, processing_result())
+    updated_invoice = apply_processing_result(
+        db, invoice, processing_result(), "execution-cleared"
+    )
 
     assert updated_invoice.status == InvoiceStatus.CLEARED
     assert updated_invoice.invoice_number == "INV-2026-4001"
@@ -155,7 +181,11 @@ def test_apply_processing_result_clears_invoice_and_saves_extracted_fields(
 
 
 def test_apply_processing_result_persists_review_exceptions(db: Session) -> None:
-    invoice = Invoice(file_path="/tmp/review.pdf", status=InvoiceStatus.PROCESSING)
+    invoice = Invoice(
+        file_path="/tmp/review.pdf",
+        status=InvoiceStatus.PROCESSING,
+        processing_idempotency_key="execution-review",
+    )
     db.add(invoice)
     db.commit()
     result = processing_result(
@@ -170,7 +200,7 @@ def test_apply_processing_result_persists_review_exceptions(db: Session) -> None
         ],
     )
 
-    apply_processing_result(db, invoice, result)
+    apply_processing_result(db, invoice, result, "execution-review")
 
     assert invoice.status == InvoiceStatus.NEEDS_REVIEW
     saved_exception = db.scalar(
@@ -192,9 +222,29 @@ def test_apply_processing_result_persists_review_exceptions(db: Session) -> None
         "exception_count": 1,
     }
 
+    replayed_invoice = apply_processing_result(
+        db, invoice, result, "execution-review"
+    )
+    saved_exceptions = db.scalars(
+        select(InvoiceException).where(InvoiceException.invoice_id == invoice.id)
+    ).all()
+    completion_events = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.invoice_id == invoice.id,
+            AuditEvent.event_type == "INVOICE_PROCESSING_COMPLETED",
+        )
+    ).all()
+    assert replayed_invoice.status == InvoiceStatus.NEEDS_REVIEW
+    assert len(saved_exceptions) == 1
+    assert len(completion_events) == 1
+
 
 def test_apply_processing_result_can_fail_processing(db: Session) -> None:
-    invoice = Invoice(file_path="/tmp/failed.pdf", status=InvoiceStatus.PROCESSING)
+    invoice = Invoice(
+        file_path="/tmp/failed.pdf",
+        status=InvoiceStatus.PROCESSING,
+        processing_idempotency_key="execution-failed",
+    )
     db.add(invoice)
     db.commit()
 
@@ -210,6 +260,7 @@ def test_apply_processing_result_can_fail_processing(db: Session) -> None:
             total_amount=None,
             extraction_confidence=None,
         ),
+        "execution-failed",
     )
 
     assert invoice.status == InvoiceStatus.FAILED
@@ -222,19 +273,51 @@ def test_apply_processing_result_rejects_invalid_lifecycle_and_repeat(
         file_path="/tmp/uploaded-result.pdf", status=InvoiceStatus.UPLOADED
     )
     processing_invoice = Invoice(
-        file_path="/tmp/completed-result.pdf", status=InvoiceStatus.PROCESSING
+        file_path="/tmp/completed-result.pdf",
+        status=InvoiceStatus.PROCESSING,
+        processing_idempotency_key="execution-completed",
     )
     db.add_all([uploaded_invoice, processing_invoice])
     db.commit()
 
     with pytest.raises(HTTPException) as uploaded_error:
-        apply_processing_result(db, uploaded_invoice, processing_result())
+        apply_processing_result(
+            db, uploaded_invoice, processing_result(), "execution-uploaded"
+        )
     assert uploaded_error.value.status_code == 409
 
-    apply_processing_result(db, processing_invoice, processing_result())
-    with pytest.raises(HTTPException) as repeat_error:
-        apply_processing_result(db, processing_invoice, processing_result())
-    assert repeat_error.value.status_code == 409
+    apply_processing_result(
+        db, processing_invoice, processing_result(), "execution-completed"
+    )
+    replayed_invoice = apply_processing_result(
+        db, processing_invoice, processing_result(), "execution-completed"
+    )
+    assert replayed_invoice.status == InvoiceStatus.CLEARED
+    with pytest.raises(HTTPException) as different_key_error:
+        apply_processing_result(
+            db, processing_invoice, processing_result(), "different-execution"
+        )
+    assert different_key_error.value.status_code == 409
+
+
+def test_apply_processing_result_rejects_different_idempotency_key(
+    db: Session,
+) -> None:
+    invoice = Invoice(
+        file_path="/tmp/key-mismatch.pdf",
+        status=InvoiceStatus.UPLOADED,
+    )
+    db.add(invoice)
+    db.commit()
+    start_invoice_processing(db, invoice, "established-execution")
+
+    with pytest.raises(HTTPException) as error:
+        apply_processing_result(
+            db, invoice, processing_result(), "different-execution"
+        )
+
+    assert error.value.status_code == 409
+    assert invoice.status == InvoiceStatus.PROCESSING
 
 
 @pytest.mark.parametrize("invalid_status", [InvoiceStatus.APPROVED, InvoiceStatus.REJECTED])
