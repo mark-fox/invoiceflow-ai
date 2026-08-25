@@ -2,67 +2,9 @@
   "name": "InvoiceFlow - API Test",
   "nodes": [
     {
-      "parameters": {},
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [
-        -288,
-        -928
-      ],
-      "id": "e3f5e37f-97bd-4282-a684-1d5f9a87061e",
-      "name": "When clicking ‘Execute workflow’"
-    },
-    {
-      "parameters": {
-        "url": "http://backend:8000/api/invoices",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.5,
-      "position": [
-        -64,
-        -928
-      ],
-      "id": "06c5d93c-c63c-4e2a-ab4e-999578163d9f",
-      "name": "Get Invoices"
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 3
-          },
-          "conditions": [
-            {
-              "id": "e15b1fb5-4aeb-4553-974d-e0308653210b",
-              "leftValue": "={{ $json.status }}",
-              "rightValue": "UPLOADED",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.filter",
-      "typeVersion": 2.3,
-      "position": [
-        144,
-        -928
-      ],
-      "id": "a3e0041c-a911-4030-8ec7-b080bf1c7149",
-      "name": "Keep Uploaded Invoices"
-    },
-    {
       "parameters": {
         "method": "POST",
-        "url": "=http://backend:8000/api/invoices/{{ $json.id }}/processing/start",
+        "url": "=http://backend:8000/api/invoices/{{ $json.invoice_id }}/processing/start",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -77,8 +19,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
       "position": [
-        336,
-        -928
+        -48,
+        -912
       ],
       "id": "6a9d22aa-4314-4c74-a6c1-2c8ee59504ad",
       "name": "Start Processing"
@@ -767,43 +709,41 @@
       ],
       "id": "6de78a2f-c6b7-4c02-b8c3-8b55ac5fc350",
       "name": "Extraction Failed?"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "invoice-uploaded",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -496,
+        -912
+      ],
+      "id": "310cdb40-655c-47cd-b1d6-787724e3fe9a",
+      "name": "Invoice Uploaded Webhook",
+      "webhookId": "21e626d1-b849-4239-8e99-6c41120d3d59"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"invoice_id\": \"{{ $json.body.invoice_id }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -272,
+        -912
+      ],
+      "id": "e5ac74ac-75fe-4bf7-9256-a7ed2a139289",
+      "name": "Normalize Webhook Input"
     }
   ],
   "pinData": {},
   "connections": {
-    "When clicking ‘Execute workflow’": {
-      "main": [
-        [
-          {
-            "node": "Get Invoices",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Get Invoices": {
-      "main": [
-        [
-          {
-            "node": "Keep Uploaded Invoices",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Keep Uploaded Invoices": {
-      "main": [
-        [
-          {
-            "node": "Start Processing",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Start Processing": {
       "main": [
         [
@@ -1070,6 +1010,28 @@
           }
         ]
       ]
+    },
+    "Invoice Uploaded Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Webhook Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Webhook Input": {
+      "main": [
+        [
+          {
+            "node": "Start Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
@@ -1078,7 +1040,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "295fc0de-3f8d-4949-89f2-f8df293c659e",
+  "versionId": "cf03031d-1764-4543-a058-aed3ef3d178e",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "097f76c6f3e7defa2cab1af64a4a5a8aeeecd466a30433ef336c127017189f01"
