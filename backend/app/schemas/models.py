@@ -115,3 +115,19 @@ class DashboardSummary(BaseModel):
     rejected: int
     failed: int
     recent_invoices: list[InvoiceListItem]
+
+
+class AutomationInvoiceCounts(BaseModel):
+    total: int
+    uploaded: int
+    processing: int
+    cleared: int
+    needs_review: int
+    failed: int
+    approved: int
+    rejected: int
+
+
+class AutomationSummary(BaseModel):
+    invoice_counts: AutomationInvoiceCounts
+    exception_counts: dict[ExceptionType, int]
