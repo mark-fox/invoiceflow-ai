@@ -1,5 +1,5 @@
-import {ArrowLeft, CalendarDays, Check, Download, FileText, Landmark, ReceiptText, X} from 'lucide-react'
-import {useState} from 'react'
+import {ArrowLeft, CalendarDays, Check, Download, FileText, Landmark, ReceiptText, RotateCcw, X} from 'lucide-react'
+import {useEffect, useState} from 'react'
 import {Link, useParams} from 'react-router-dom'
 
 import {api} from '../api/client'
@@ -12,18 +12,60 @@ export function InvoiceDetailPage() {
   const {id = ''} = useParams()
   const {data, error, loading, setData} = useLoad(() => api.invoice(id), [id])
   const [busy, setBusy] = useState(false)
-  const [reviewError, setReviewError] = useState('')
+  const [retrying, setRetrying] = useState(false)
+  const [actionError, setActionError] = useState('')
+
+  useEffect(() => {
+    const isActiveStatus = data?.status === 'UPLOADED' || data?.status === 'PROCESSING'
+    if (!data || String(data.id) !== id || !isActiveStatus) return
+
+    let cancelled = false
+    let timerId: number | undefined
+
+    const schedulePoll = () => {
+      timerId = window.setTimeout(async () => {
+        try {
+          const refreshedInvoice = await api.invoice(id)
+          if (!cancelled) setData(refreshedInvoice)
+        } catch {
+          // Preserve the current invoice and let the next scheduled poll retry.
+        } finally {
+          if (!cancelled) schedulePoll()
+        }
+      }, 2000)
+    }
+
+    schedulePoll()
+    return () => {
+      cancelled = true
+      if (timerId !== undefined) window.clearTimeout(timerId)
+    }
+  }, [id, data?.id, data?.status, setData])
 
   async function review(action: 'approve' | 'reject') {
     if (!data) return
     setBusy(true)
-    setReviewError('')
+    setActionError('')
     try {
       setData(await api.review(data.id, action))
     } catch (error) {
-      setReviewError(error instanceof Error ? error.message : 'Unable to update the invoice.')
+      setActionError(error instanceof Error ? error.message : 'Unable to update the invoice.')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function retryProcessing() {
+    if (!data || retrying) return
+    setRetrying(true)
+    setActionError('')
+    try {
+      await api.dispatchProcessing(data.id)
+      setData(await api.invoice(data.id))
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unable to retry processing.')
+    } finally {
+      setRetrying(false)
     }
   }
 
@@ -41,13 +83,14 @@ export function InvoiceDetailPage() {
       <div className="detail-actions">
         <a className="button secondary" href={api.invoiceFileUrl(data.id)}><Download size={17}/>Source file</a>
         <StatusBadge status={data.status}/>
+        {data.status === 'UPLOADED' && <button disabled={retrying} className="button secondary" onClick={retryProcessing}><RotateCcw size={17}/>{retrying ? 'Retrying...' : 'Retry Processing'}</button>}
         {data.status === 'NEEDS_REVIEW' && <>
           <button disabled={busy} className="button danger" onClick={() => review('reject')}><X size={17}/>Reject</button>
           <button disabled={busy} className="button success" onClick={() => review('approve')}><Check size={17}/>Approve</button>
         </>}
       </div>
     </div>
-    {reviewError && <div className="inline-error review-error">{reviewError}</div>}
+    {actionError && <div className="inline-error review-error">{actionError}</div>}
     <div className="detail-grid">
       <div>
         <section className="panel info-panel">
