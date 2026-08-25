@@ -104,7 +104,10 @@ def test_start_processing_updates_uploaded_invoice_and_records_audit_event(db: S
     )
     assert event is not None
     assert event.message == "Automated invoice processing started."
-    assert event.event_metadata == {"idempotency_key": "execution-1001"}
+    assert event.event_metadata == {
+        "idempotency_key": "execution-1001",
+        "workflow_execution_id": "execution-1001",
+    }
 
     replayed_invoice = start_invoice_processing(db, invoice, "execution-1001")
     start_events = db.scalars(
@@ -176,6 +179,7 @@ def test_apply_processing_result_clears_invoice_and_saves_extracted_fields(
         )
     )
     assert event is not None
+    assert event.event_metadata["workflow_execution_id"] == "execution-cleared"
     assert event.event_metadata["resulting_status"] == "CLEARED"
     assert event.event_metadata["exception_count"] == 0
 
@@ -218,6 +222,7 @@ def test_apply_processing_result_persists_review_exceptions(db: Session) -> None
     )
     assert event is not None
     assert event.event_metadata == {
+        "workflow_execution_id": "execution-review",
         "resulting_status": "NEEDS_REVIEW",
         "exception_count": 1,
     }

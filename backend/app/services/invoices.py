@@ -86,7 +86,10 @@ def start_invoice_processing(
             invoice_id=invoice.id,
             event_type="INVOICE_PROCESSING_STARTED",
             message="Automated invoice processing started.",
-            event_metadata={"idempotency_key": idempotency_key},
+            event_metadata={
+                "idempotency_key": idempotency_key,
+                "workflow_execution_id": idempotency_key,
+            },
         )
     )
     try:
@@ -148,6 +151,7 @@ def apply_processing_result(
             event_type="INVOICE_PROCESSING_COMPLETED",
             message=f"Invoice processing completed with status {result.status.value}.",
             event_metadata={
+                "workflow_execution_id": idempotency_key,
                 "resulting_status": result.status.value,
                 "exception_count": len(result.exceptions),
             },
