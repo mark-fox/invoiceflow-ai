@@ -113,6 +113,85 @@ def test_dispatch_failure_preserves_uploaded_invoice(
     assert "invoice remains uploaded" in caplog.text
 
 
+def test_retry_dispatch_succeeds_for_uploaded_invoice(
+    db: Session, monkeypatch
+) -> None:
+    invoice = Invoice(file_path="/tmp/retry.pdf", status=InvoiceStatus.UPLOADED)
+    db.add(invoice)
+    db.commit()
+    dispatched_ids = []
+
+    async def successful_dispatch(invoice_id: int) -> None:
+        dispatched_ids.append(invoice_id)
+
+    monkeypatch.setattr(
+        invoice_routes, "dispatch_invoice_uploaded", successful_dispatch
+    )
+
+    response = asyncio.run(invoice_routes.dispatch_processing(invoice.id, db))
+
+    assert response.dispatched is True
+    assert response.invoice_id == invoice.id
+    assert dispatched_ids == [invoice.id]
+    assert invoice.status == InvoiceStatus.UPLOADED
+
+
+@pytest.mark.parametrize(
+    "invoice_status",
+    [
+        InvoiceStatus.PROCESSING,
+        InvoiceStatus.CLEARED,
+        InvoiceStatus.NEEDS_REVIEW,
+        InvoiceStatus.FAILED,
+        InvoiceStatus.APPROVED,
+        InvoiceStatus.REJECTED,
+    ],
+)
+def test_retry_dispatch_rejects_non_uploaded_invoice(
+    db: Session, monkeypatch, invoice_status: InvoiceStatus
+) -> None:
+    invoice = Invoice(file_path="/tmp/not-retryable.pdf", status=invoice_status)
+    db.add(invoice)
+    db.commit()
+    dispatched = False
+
+    async def unexpected_dispatch(invoice_id: int) -> None:
+        nonlocal dispatched
+        dispatched = True
+
+    monkeypatch.setattr(
+        invoice_routes, "dispatch_invoice_uploaded", unexpected_dispatch
+    )
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(invoice_routes.dispatch_processing(invoice.id, db))
+
+    assert error.value.status_code == 409
+    assert dispatched is False
+
+
+def test_retry_dispatch_failure_leaves_invoice_uploaded(
+    db: Session, monkeypatch, caplog
+) -> None:
+    invoice = Invoice(file_path="/tmp/retry-failure.pdf", status=InvoiceStatus.UPLOADED)
+    db.add(invoice)
+    db.commit()
+
+    async def failed_dispatch(invoice_id: int) -> None:
+        raise httpx.ConnectError("n8n unavailable")
+
+    monkeypatch.setattr(invoice_routes, "dispatch_invoice_uploaded", failed_dispatch)
+
+    with caplog.at_level("ERROR"):
+        with pytest.raises(HTTPException) as error:
+            asyncio.run(invoice_routes.dispatch_processing(invoice.id, db))
+
+    db.refresh(invoice)
+    assert error.value.status_code == 502
+    assert invoice.status == InvoiceStatus.UPLOADED
+    assert "remains uploaded for retry" in caplog.text
+
+
 def test_duplicate_check_returns_matching_invoice_id(db: Session) -> None:
     invoice = add_invoice(db, "INV-1001", "Northstar Office Supply")
 

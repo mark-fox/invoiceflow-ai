@@ -14,6 +14,7 @@ from app.schemas.models import (
     DuplicateCheckOut,
     InvoiceDetail,
     InvoiceListItem,
+    ProcessingDispatchOut,
     ProcessingResultIn,
 )
 from app.services.invoices import (
@@ -84,6 +85,32 @@ def download_invoice_file(invoice_id: int, db: Session = Depends(get_db)) -> Fil
     if not file_path.is_relative_to(upload_root) or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Invoice file is not available.")
     return FileResponse(file_path, filename=file_path.name)
+
+
+@router.post(
+    "/{invoice_id}/processing/dispatch", response_model=ProcessingDispatchOut
+)
+async def dispatch_processing(
+    invoice_id: int, db: Session = Depends(get_db)
+) -> ProcessingDispatchOut:
+    invoice = _get(db, invoice_id)
+    if invoice.status != InvoiceStatus.UPLOADED:
+        raise HTTPException(
+            status_code=409,
+            detail="Only uploaded invoices can be dispatched for processing.",
+        )
+    try:
+        await dispatch_invoice_uploaded(invoice.id)
+    except httpx.HTTPError as exc:
+        logger.exception(
+            "Failed to dispatch invoice %s to n8n; invoice remains uploaded for retry.",
+            invoice.id,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Invoice workflow dispatch failed.",
+        ) from exc
+    return ProcessingDispatchOut(dispatched=True, invoice_id=invoice.id)
 
 
 @router.post("/{invoice_id}/processing/start", response_model=InvoiceDetail)

@@ -68,6 +68,11 @@ class DuplicateCheckOut(BaseModel):
     matching_invoice_id: int | None = None
 
 
+class ProcessingDispatchOut(BaseModel):
+    dispatched: bool
+    invoice_id: int
+
+
 class ProcessingExceptionIn(BaseModel):
     exception_type: ExceptionType
     description: str
