@@ -67,6 +67,51 @@ async def dispatch_invoice_uploaded(invoice_id: int) -> None:
         response.raise_for_status()
 
 
+def record_processing_dispatch_failure(
+    db: Session,
+    invoice: Invoice,
+    *,
+    dispatch_source: str,
+    error: Exception,
+) -> AuditEvent:
+    event = AuditEvent(
+        invoice_id=invoice.id,
+        event_type="INVOICE_PROCESSING_DISPATCH_FAILED",
+        message="Automated processing could not be started.",
+        event_metadata={
+            "dispatch_source": dispatch_source,
+            "error_type": type(error).__name__,
+        },
+    )
+    db.add(event)
+    try:
+        db.commit()
+        db.refresh(event)
+    except Exception:
+        db.rollback()
+        raise
+    return event
+
+
+def record_processing_redispatched(
+    db: Session, invoice: Invoice
+) -> AuditEvent:
+    event = AuditEvent(
+        invoice_id=invoice.id,
+        event_type="INVOICE_PROCESSING_REDISPATCHED",
+        message="Automated invoice processing was retried.",
+        event_metadata={"dispatch_source": "manual_retry"},
+    )
+    db.add(event)
+    try:
+        db.commit()
+        db.refresh(event)
+    except Exception:
+        db.rollback()
+        raise
+    return event
+
+
 def review_invoice(db: Session, invoice: Invoice, new_status: InvoiceStatus) -> Invoice:
     if invoice.status != InvoiceStatus.NEEDS_REVIEW:
         raise HTTPException(status_code=409, detail="Only invoices needing review can be approved or rejected.")

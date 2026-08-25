@@ -13,7 +13,7 @@ from app.api.routes import invoices as invoice_routes
 from app.api.routes.invoices import check_duplicate_invoice, router
 from app.core.config import settings
 from app.db.session import Base
-from app.models import Invoice, InvoiceStatus
+from app.models import AuditEvent, Invoice, InvoiceStatus
 
 
 @pytest.fixture
@@ -110,6 +110,18 @@ def test_dispatch_failure_preserves_uploaded_invoice(
     stored_invoice = db.scalar(select(Invoice).where(Invoice.id == response.id))
     assert stored_invoice is not None
     assert stored_invoice.status == InvoiceStatus.UPLOADED
+    failure_event = db.scalar(
+        select(AuditEvent).where(
+            AuditEvent.invoice_id == stored_invoice.id,
+            AuditEvent.event_type == "INVOICE_PROCESSING_DISPATCH_FAILED",
+        )
+    )
+    assert failure_event is not None
+    assert failure_event.message == "Automated processing could not be started."
+    assert failure_event.event_metadata == {
+        "dispatch_source": "upload",
+        "error_type": "ConnectError",
+    }
     assert "invoice remains uploaded" in caplog.text
 
 
@@ -134,6 +146,15 @@ def test_retry_dispatch_succeeds_for_uploaded_invoice(
     assert response.invoice_id == invoice.id
     assert dispatched_ids == [invoice.id]
     assert invoice.status == InvoiceStatus.UPLOADED
+    redispatch_event = db.scalar(
+        select(AuditEvent).where(
+            AuditEvent.invoice_id == invoice.id,
+            AuditEvent.event_type == "INVOICE_PROCESSING_REDISPATCHED",
+        )
+    )
+    assert redispatch_event is not None
+    assert redispatch_event.message == "Automated invoice processing was retried."
+    assert redispatch_event.event_metadata == {"dispatch_source": "manual_retry"}
 
 
 @pytest.mark.parametrize(
@@ -178,7 +199,9 @@ def test_retry_dispatch_failure_leaves_invoice_uploaded(
     db.commit()
 
     async def failed_dispatch(invoice_id: int) -> None:
-        raise httpx.ConnectError("n8n unavailable")
+        raise httpx.ConnectError(
+            "n8n unavailable api_key=super-secret Authorization=Bearer fake-token"
+        )
 
     monkeypatch.setattr(invoice_routes, "dispatch_invoice_uploaded", failed_dispatch)
 
@@ -189,6 +212,27 @@ def test_retry_dispatch_failure_leaves_invoice_uploaded(
     db.refresh(invoice)
     assert error.value.status_code == 502
     assert invoice.status == InvoiceStatus.UPLOADED
+    failure_event = db.scalar(
+        select(AuditEvent).where(
+            AuditEvent.invoice_id == invoice.id,
+            AuditEvent.event_type == "INVOICE_PROCESSING_DISPATCH_FAILED",
+        )
+    )
+    assert failure_event is not None
+    assert failure_event.event_metadata == {
+        "dispatch_source": "manual_retry",
+        "error_type": "ConnectError",
+    }
+    serialized_metadata = str(failure_event.event_metadata)
+    assert "super-secret" not in serialized_metadata
+    assert "fake-token" not in serialized_metadata
+    redispatch_event = db.scalar(
+        select(AuditEvent).where(
+            AuditEvent.invoice_id == invoice.id,
+            AuditEvent.event_type == "INVOICE_PROCESSING_REDISPATCHED",
+        )
+    )
+    assert redispatch_event is None
     assert "remains uploaded for retry" in caplog.text
 
 

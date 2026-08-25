@@ -20,6 +20,8 @@ from app.schemas.models import (
 from app.services.invoices import (
     apply_processing_result,
     dispatch_invoice_uploaded,
+    record_processing_dispatch_failure,
+    record_processing_redispatched,
     review_invoice,
     save_upload,
     start_invoice_processing,
@@ -44,10 +46,17 @@ async def upload_invoice(
     invoice = save_upload(db, file)
     try:
         await dispatch_invoice_uploaded(invoice.id)
-    except httpx.HTTPError:
-        logger.exception(
-            "Failed to dispatch uploaded invoice %s to n8n; invoice remains uploaded.",
+    except httpx.HTTPError as exc:
+        record_processing_dispatch_failure(
+            db,
+            invoice,
+            dispatch_source="upload",
+            error=exc,
+        )
+        logger.error(
+            "Failed to dispatch uploaded invoice %s to n8n; invoice remains uploaded. Error type: %s.",
             invoice.id,
+            type(exc).__name__,
         )
     return _detail(db, invoice.id)
 
@@ -102,14 +111,22 @@ async def dispatch_processing(
     try:
         await dispatch_invoice_uploaded(invoice.id)
     except httpx.HTTPError as exc:
-        logger.exception(
-            "Failed to dispatch invoice %s to n8n; invoice remains uploaded for retry.",
+        record_processing_dispatch_failure(
+            db,
+            invoice,
+            dispatch_source="manual_retry",
+            error=exc,
+        )
+        logger.error(
+            "Failed to dispatch invoice %s to n8n; invoice remains uploaded for retry. Error type: %s.",
             invoice.id,
+            type(exc).__name__,
         )
         raise HTTPException(
             status_code=502,
             detail="Invoice workflow dispatch failed.",
         ) from exc
+    record_processing_redispatched(db, invoice)
     return ProcessingDispatchOut(dispatched=True, invoice_id=invoice.id)
 
 
