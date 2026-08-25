@@ -16,6 +16,7 @@ from app.models import AuditEvent, ExceptionType, Invoice, InvoiceException, Inv
 from app.schemas.models import ProcessingExceptionIn, ProcessingResultIn
 from app.services.invoices import (
     apply_processing_result,
+    dispatch_invoice_uploaded,
     review_invoice,
     save_upload,
     start_invoice_processing,
@@ -47,6 +48,49 @@ def processing_result(**overrides) -> ProcessingResultIn:
     }
     values.update(overrides)
     return ProcessingResultIn(**values)
+
+
+def test_dispatch_invoice_uploaded_uses_configured_webhook(
+    monkeypatch,
+) -> None:
+    calls = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            calls["status_checked"] = True
+
+    class FakeAsyncClient:
+        def __init__(self, *, timeout: float) -> None:
+            calls["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def post(self, url: str, *, json: dict) -> FakeResponse:
+            calls["url"] = url
+            calls["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        settings,
+        "n8n_invoice_webhook_url",
+        "http://n8n:5678/webhook/invoice-uploaded-test",
+    )
+    monkeypatch.setattr("app.services.invoices.httpx.AsyncClient", FakeAsyncClient)
+
+    import asyncio
+
+    asyncio.run(dispatch_invoice_uploaded(42))
+
+    assert calls == {
+        "timeout": 5.0,
+        "url": "http://n8n:5678/webhook/invoice-uploaded-test",
+        "json": {"invoice_id": 42},
+        "status_checked": True,
+    }
 
 
 def test_upload_persists_invoice_and_audit_event(db: Session, tmp_path, monkeypatch) -> None:

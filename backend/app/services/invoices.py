@@ -1,6 +1,7 @@
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,7 @@ ALLOWED_EXTENSIONS = {
     "image/tiff": {".tif", ".tiff"},
 }
 MAX_FILE_SIZE = 15 * 1024 * 1024
+WEBHOOK_TIMEOUT_SECONDS = 5.0
 
 
 def save_upload(db: Session, upload: UploadFile) -> Invoice:
@@ -54,6 +56,15 @@ def save_upload(db: Session, upload: UploadFile) -> Invoice:
         destination.unlink(missing_ok=True)
         raise
     return invoice
+
+
+async def dispatch_invoice_uploaded(invoice_id: int) -> None:
+    async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT_SECONDS) as client:
+        response = await client.post(
+            settings.n8n_invoice_webhook_url,
+            json={"invoice_id": invoice_id},
+        )
+        response.raise_for_status()
 
 
 def review_invoice(db: Session, invoice: Invoice, new_status: InvoiceStatus) -> Invoice:

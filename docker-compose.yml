@@ -18,6 +18,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-invoiceflow}:${POSTGRES_PASSWORD:-invoiceflow}@db:5432/${POSTGRES_DB:-invoiceflow}
       FRONTEND_ORIGIN: http://localhost:5173
+      N8N_INVOICE_WEBHOOK_URL: ${N8N_INVOICE_WEBHOOK_URL:-http://n8n:5678/webhook/invoice-uploaded}
       UPLOAD_DIR: /app/uploads
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
     volumes:

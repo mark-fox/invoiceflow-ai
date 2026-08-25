@@ -1,10 +1,17 @@
-import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+import asyncio
+from io import BytesIO
 
+import httpx
+import pytest
+from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
+from starlette.datastructures import Headers
+
+from app.api.routes import invoices as invoice_routes
 from app.api.routes.invoices import check_duplicate_invoice, router
+from app.core.config import settings
 from app.db.session import Base
 from app.models import Invoice, InvoiceStatus
 
@@ -36,6 +43,74 @@ def add_invoice(
     db.add(invoice)
     db.commit()
     return invoice
+
+
+def invoice_upload() -> UploadFile:
+    return UploadFile(
+        filename="invoice.pdf",
+        file=BytesIO(b"%PDF-1.7\ntest invoice"),
+        headers=Headers({"content-type": "application/pdf"}),
+    )
+
+
+def test_upload_dispatches_committed_invoice_id(monkeypatch) -> None:
+    sequence = []
+    invoice = Invoice(id=73, file_path="/tmp/invoice.pdf", status=InvoiceStatus.UPLOADED)
+
+    def fake_save_upload(db, file):
+        sequence.append("committed")
+        return invoice
+
+    async def fake_dispatch(invoice_id: int) -> None:
+        assert sequence == ["committed"]
+        sequence.append(("dispatched", invoice_id))
+
+    monkeypatch.setattr(invoice_routes, "save_upload", fake_save_upload)
+    monkeypatch.setattr(invoice_routes, "dispatch_invoice_uploaded", fake_dispatch)
+    monkeypatch.setattr(invoice_routes, "_detail", lambda db, invoice_id: invoice)
+
+    result = asyncio.run(invoice_routes.upload_invoice(invoice_upload(), object()))
+
+    assert result.id == 73
+    assert sequence == ["committed", ("dispatched", 73)]
+
+
+def test_upload_failure_does_not_dispatch(monkeypatch) -> None:
+    dispatched = False
+
+    def fake_save_upload(db, file):
+        raise HTTPException(status_code=415, detail="Invalid invoice file.")
+
+    async def fake_dispatch(invoice_id: int) -> None:
+        nonlocal dispatched
+        dispatched = True
+
+    monkeypatch.setattr(invoice_routes, "save_upload", fake_save_upload)
+    monkeypatch.setattr(invoice_routes, "dispatch_invoice_uploaded", fake_dispatch)
+
+    with pytest.raises(HTTPException):
+        asyncio.run(invoice_routes.upload_invoice(invoice_upload(), object()))
+
+    assert dispatched is False
+
+
+def test_dispatch_failure_preserves_uploaded_invoice(
+    db: Session, tmp_path, monkeypatch, caplog
+) -> None:
+    monkeypatch.setattr(settings, "upload_dir", tmp_path)
+
+    async def failed_dispatch(invoice_id: int) -> None:
+        raise httpx.ConnectError("n8n unavailable")
+
+    monkeypatch.setattr(invoice_routes, "dispatch_invoice_uploaded", failed_dispatch)
+
+    with caplog.at_level("ERROR"):
+        response = asyncio.run(invoice_routes.upload_invoice(invoice_upload(), db))
+
+    stored_invoice = db.scalar(select(Invoice).where(Invoice.id == response.id))
+    assert stored_invoice is not None
+    assert stored_invoice.status == InvoiceStatus.UPLOADED
+    assert "invoice remains uploaded" in caplog.text
 
 
 def test_duplicate_check_returns_matching_invoice_id(db: Session) -> None:

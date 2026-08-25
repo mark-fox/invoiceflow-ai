@@ -1,5 +1,7 @@
+import logging
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import select
@@ -16,12 +18,14 @@ from app.schemas.models import (
 )
 from app.services.invoices import (
     apply_processing_result,
+    dispatch_invoice_uploaded,
     review_invoice,
     save_upload,
     start_invoice_processing,
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[InvoiceListItem])
@@ -33,8 +37,17 @@ def list_invoices(status: InvoiceStatus | None = None, db: Session = Depends(get
 
 
 @router.post("/upload", response_model=InvoiceDetail, status_code=201)
-def upload_invoice(file: UploadFile = File(...), db: Session = Depends(get_db)) -> InvoiceDetail:
+async def upload_invoice(
+    file: UploadFile = File(...), db: Session = Depends(get_db)
+) -> InvoiceDetail:
     invoice = save_upload(db, file)
+    try:
+        await dispatch_invoice_uploaded(invoice.id)
+    except httpx.HTTPError:
+        logger.exception(
+            "Failed to dispatch uploaded invoice %s to n8n; invoice remains uploaded.",
+            invoice.id,
+        )
     return _detail(db, invoice.id)
 
 
