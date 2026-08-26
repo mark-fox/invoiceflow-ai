@@ -6,7 +6,7 @@ import {InvoiceTable} from '../components/InvoiceTable'
 import {ErrorState,Loading} from '../components/Loading'
 import {StatusBadge} from '../components/StatusBadge'
 import {useLoad} from '../hooks'
-import type {AutomationSummary,RecentProcessingActivity} from '../types'
+import type {AutomationMetrics,AutomationSummary,RecentProcessingActivity} from '../types'
 
 const cards=[
   ['total_invoices','Total invoices',FileStack,'blue'],
@@ -33,9 +33,13 @@ const exceptionLabels:Array<[keyof AutomationSummary['exception_counts'],string]
   ['MISSING_FIELD','Missing Field'],
 ]
 
+const percentFormatter=new Intl.NumberFormat('en-US',{style:'percent',maximumFractionDigits:1})
+const secondsFormatter=new Intl.NumberFormat('en-US',{maximumFractionDigits:1})
+
 export function Dashboard(){
   const {data,error,loading}=useLoad(api.dashboard)
   const automation=useLoad(api.automationSummary)
+  const performance=useLoad(api.automationMetrics)
   const recentProcessing=useLoad(api.recentProcessing)
 
   if(loading)return <Loading/>
@@ -49,6 +53,7 @@ export function Dashboard(){
       {cards.map(([key,label,Icon,tone])=><div className="metric" key={key}><div className={`metric-icon ${tone}`}><Icon size={20}/></div><span>{label}</span><strong>{data[key]}</strong></div>)}
     </section>
     <AutomationOverview {...automation}/>
+    <AutomationPerformance {...performance}/>
     <RecentProcessing {...recentProcessing}/>
     <section className="panel">
       <div className="panel-head"><div><h2>Recent invoices</h2><p>Latest activity across the invoice queue</p></div><a href="/invoices">View all invoices →</a></div>
@@ -72,6 +77,33 @@ function AutomationOverview({data,error,loading}:{data:AutomationSummary|null;er
       </div>
     </div>}
   </section>
+}
+
+function AutomationPerformance({data,error,loading}:{data:AutomationMetrics|null;error:string;loading:boolean}){
+  const metrics=data?[
+    ['Auto-clear rate',percentFormatter.format(data.auto_clear_rate),`${data.auto_cleared_count} auto-cleared`],
+    ['Review rate',percentFormatter.format(data.review_rate),`${data.needs_review_count} reviewed`],
+    ['Failure rate',percentFormatter.format(data.failure_rate),`${data.failed_count} failed`],
+    ['Average processing time',formatProcessingTime(data.average_processing_seconds),`${data.completed_count} completed`],
+  ]:[]
+
+  return <section className="panel automation-performance">
+    <div className="panel-head"><div><h2>Automation Performance</h2><p>Processing outcomes and execution speed</p></div></div>
+    {loading&&<div className="automation-message">Loading performance metrics…</div>}
+    {!loading&&error&&<div className="inline-error automation-error"><b>Performance metrics unavailable</b><span>{error}</span></div>}
+    {!loading&&data&&<div className="performance-grid">{metrics.map(([label,value,detail])=><div className="performance-metric" key={label}>
+      <span>{label}</span><strong>{value}</strong><small>{detail}</small>
+    </div>)}</div>}
+  </section>
+}
+
+function formatProcessingTime(seconds:number|null){
+  if(seconds===null)return 'Not available'
+  if(seconds<60)return `${secondsFormatter.format(seconds)} sec`
+  const roundedSeconds=Math.round(seconds)
+  const minutes=Math.floor(roundedSeconds/60)
+  const remainingSeconds=roundedSeconds%60
+  return remainingSeconds?`${minutes} min ${remainingSeconds} sec`:`${minutes} min`
 }
 
 function RecentProcessing({data,error,loading}:{data:RecentProcessingActivity[]|null;error:string;loading:boolean}){
