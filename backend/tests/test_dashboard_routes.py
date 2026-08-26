@@ -1,10 +1,12 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.api.routes.dashboard import get_automation_summary
+from app.api.routes.dashboard import get_automation_summary, get_recent_processing
 from app.db.session import Base
-from app.models import ExceptionType, Invoice, InvoiceException, InvoiceStatus
+from app.models import AuditEvent, ExceptionType, Invoice, InvoiceException, InvoiceStatus
 
 
 @pytest.fixture
@@ -92,3 +94,114 @@ def test_automation_summary_returns_all_zero_counts_for_empty_database(
     assert result.exception_counts == {
         exception_type: 0 for exception_type in ExceptionType
     }
+
+
+def test_recent_processing_returns_only_completions_newest_first(
+    db: Session,
+) -> None:
+    older_invoice = Invoice(
+        file_path="uploads/older.pdf",
+        invoice_number="INV-1001",
+        vendor_name="Northstar Parts",
+        status=InvoiceStatus.CLEARED,
+    )
+    newer_invoice = Invoice(
+        file_path="uploads/newer.pdf",
+        invoice_number=None,
+        vendor_name=None,
+        status=InvoiceStatus.NEEDS_REVIEW,
+    )
+    db.add_all([older_invoice, newer_invoice])
+    db.flush()
+
+    base_time = datetime(2026, 8, 25, 20, 0, tzinfo=UTC)
+    db.add_all(
+        [
+            AuditEvent(
+                invoice_id=older_invoice.id,
+                event_type="INVOICE_PROCESSING_COMPLETED",
+                message="Processing completed.",
+                created_at=base_time,
+            ),
+            AuditEvent(
+                invoice_id=newer_invoice.id,
+                event_type="INVOICE_PROCESSING_COMPLETED",
+                message="Processing completed.",
+                created_at=base_time + timedelta(minutes=10),
+            ),
+            AuditEvent(
+                invoice_id=older_invoice.id,
+                event_type="INVOICE_PROCESSING_STARTED",
+                message="Processing started.",
+                created_at=base_time + timedelta(minutes=20),
+            ),
+            AuditEvent(
+                invoice_id=older_invoice.id,
+                event_type="INVOICE_APPROVED",
+                message="Invoice approved.",
+                created_at=base_time + timedelta(minutes=30),
+            ),
+            InvoiceException(
+                invoice_id=newer_invoice.id,
+                exception_type=ExceptionType.UNKNOWN_PO,
+                description="Purchase order was not found.",
+            ),
+            InvoiceException(
+                invoice_id=newer_invoice.id,
+                exception_type=ExceptionType.LOW_CONFIDENCE,
+                description="Extraction confidence was below the threshold.",
+            ),
+        ]
+    )
+    db.commit()
+
+    result = get_recent_processing(db)
+
+    assert [item.invoice_id for item in result] == [
+        newer_invoice.id,
+        older_invoice.id,
+    ]
+    assert result[0].invoice_number is None
+    assert result[0].vendor_name is None
+    assert result[0].status == InvoiceStatus.NEEDS_REVIEW
+    assert result[0].exception_count == 2
+    assert result[1].invoice_number == "INV-1001"
+    assert result[1].vendor_name == "Northstar Parts"
+    assert result[1].status == InvoiceStatus.CLEARED
+    assert result[1].exception_count == 0
+
+
+def test_recent_processing_returns_empty_list_for_empty_database(db: Session) -> None:
+    assert get_recent_processing(db) == []
+
+
+def test_recent_processing_limits_results_to_ten(db: Session) -> None:
+    base_time = datetime(2026, 8, 25, 20, 0, tzinfo=UTC)
+    invoices = [
+        Invoice(
+            file_path=f"uploads/invoice-{index}.pdf",
+            status=InvoiceStatus.CLEARED,
+        )
+        for index in range(12)
+    ]
+    db.add_all(invoices)
+    db.flush()
+    db.add_all(
+        [
+            AuditEvent(
+                invoice_id=invoice.id,
+                event_type="INVOICE_PROCESSING_COMPLETED",
+                message="Processing completed.",
+                created_at=base_time + timedelta(minutes=index),
+            )
+            for index, invoice in enumerate(invoices)
+        ]
+    )
+    db.commit()
+
+    result = get_recent_processing(db)
+
+    assert len(result) == 10
+    assert [item.invoice_id for item in result] == [
+        invoice.id for invoice in reversed(invoices[2:])
+    ]

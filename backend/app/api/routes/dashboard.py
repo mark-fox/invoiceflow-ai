@@ -3,8 +3,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import ExceptionType, Invoice, InvoiceException, InvoiceStatus
-from app.schemas.models import AutomationInvoiceCounts, AutomationSummary, DashboardSummary
+from app.models import AuditEvent, ExceptionType, Invoice, InvoiceException, InvoiceStatus
+from app.schemas.models import (
+    AutomationInvoiceCounts,
+    AutomationSummary,
+    DashboardSummary,
+    RecentProcessingItem,
+)
 
 router = APIRouter()
 
@@ -55,3 +60,39 @@ def get_automation_summary(db: Session = Depends(get_db)) -> AutomationSummary:
             for exception_type in ExceptionType
         },
     )
+
+
+@router.get("/recent-processing", response_model=list[RecentProcessingItem])
+def get_recent_processing(
+    db: Session = Depends(get_db),
+) -> list[RecentProcessingItem]:
+    exception_counts = (
+        select(
+            InvoiceException.invoice_id,
+            func.count(InvoiceException.id).label("exception_count"),
+        )
+        .group_by(InvoiceException.invoice_id)
+        .subquery()
+    )
+    rows = db.execute(
+        select(
+            AuditEvent.invoice_id,
+            Invoice.invoice_number,
+            Invoice.vendor_name,
+            Invoice.status,
+            AuditEvent.created_at.label("completed_at"),
+            func.coalesce(exception_counts.c.exception_count, 0).label(
+                "exception_count"
+            ),
+        )
+        .join(Invoice, Invoice.id == AuditEvent.invoice_id)
+        .outerjoin(
+            exception_counts,
+            exception_counts.c.invoice_id == Invoice.id,
+        )
+        .where(AuditEvent.event_type == "INVOICE_PROCESSING_COMPLETED")
+        .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+        .limit(10)
+    ).mappings()
+
+    return [RecentProcessingItem.model_validate(row) for row in rows]

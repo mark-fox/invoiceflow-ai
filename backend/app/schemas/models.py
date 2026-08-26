@@ -131,3 +131,12 @@ class AutomationInvoiceCounts(BaseModel):
 class AutomationSummary(BaseModel):
     invoice_counts: AutomationInvoiceCounts
     exception_counts: dict[ExceptionType, int]
+
+
+class RecentProcessingItem(BaseModel):
+    invoice_id: int
+    invoice_number: str | None
+    vendor_name: str | None
+    status: InvoiceStatus
+    completed_at: datetime
+    exception_count: int
