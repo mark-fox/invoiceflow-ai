@@ -20,3 +20,11 @@ export interface AutomationSummary {
   }
   exception_counts: Record<'AMOUNT_MISMATCH'|'UNKNOWN_PO'|'DUPLICATE_INVOICE'|'LOW_CONFIDENCE'|'MISSING_FIELD',number>
 }
+export interface RecentProcessingActivity {
+  invoice_id: number
+  invoice_number: string|null
+  vendor_name: string|null
+  status: InvoiceStatus
+  completed_at: string
+  exception_count: number
+}
