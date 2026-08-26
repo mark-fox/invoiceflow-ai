@@ -7,3 +7,16 @@ export interface AuditEvent {id:number;event_type:string;message:string;metadata
 export interface InvoiceDetail extends Invoice {po_number:string|null;invoice_date:string|null;extraction_confidence:string|null;updated_at:string;purchase_order:PurchaseOrder|null;exceptions:InvoiceException[];audit_events:AuditEvent[]}
 export interface ProcessingDispatch {dispatched:boolean;invoice_id:number}
 export interface Dashboard {total_invoices:number;automatically_cleared:number;needs_review:number;approved:number;rejected:number;failed:number;recent_invoices:Invoice[]}
+export interface AutomationSummary {
+  invoice_counts: {
+    total: number
+    uploaded: number
+    processing: number
+    cleared: number
+    needs_review: number
+    failed: number
+    approved: number
+    rejected: number
+  }
+  exception_counts: Record<'AMOUNT_MISMATCH'|'UNKNOWN_PO'|'DUPLICATE_INVOICE'|'LOW_CONFIDENCE'|'MISSING_FIELD',number>
+}
