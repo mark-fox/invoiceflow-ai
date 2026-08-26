@@ -60,7 +60,7 @@
     },
     {
       "parameters": {
-        "url": "=http://backend:8000/api/purchase-orders/by-number/{{ $json.po_number }}",
+        "url": "=http://backend:8000/api/purchase-orders/by-number/{{ $('Parse Extraction Result').item.json.po_number }}",
         "options": {
           "response": {
             "response": {
@@ -1034,13 +1034,13 @@
       ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "cf03031d-1764-4543-a058-aed3ef3d178e",
+  "versionId": "fbf49bcd-0dd3-450a-8a82-3a84bc1c57cb",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "097f76c6f3e7defa2cab1af64a4a5a8aeeecd466a30433ef336c127017189f01"
