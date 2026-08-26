@@ -140,3 +140,14 @@ class RecentProcessingItem(BaseModel):
     status: InvoiceStatus
     completed_at: datetime
     exception_count: int
+
+
+class AutomationMetrics(BaseModel):
+    completed_count: int
+    auto_cleared_count: int
+    needs_review_count: int
+    failed_count: int
+    auto_clear_rate: float
+    review_rate: float
+    failure_rate: float
+    average_processing_seconds: float | None

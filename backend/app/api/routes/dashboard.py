@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import AuditEvent, ExceptionType, Invoice, InvoiceException, InvoiceStatus
 from app.schemas.models import (
     AutomationInvoiceCounts,
+    AutomationMetrics,
     AutomationSummary,
     DashboardSummary,
     RecentProcessingItem,
@@ -59,6 +60,114 @@ def get_automation_summary(db: Session = Depends(get_db)) -> AutomationSummary:
             exception_type: exception_counts.get(exception_type, 0)
             for exception_type in ExceptionType
         },
+    )
+
+
+@router.get("/automation-metrics", response_model=AutomationMetrics)
+def get_automation_metrics(db: Session = Depends(get_db)) -> AutomationMetrics:
+    resulting_status = AuditEvent.event_metadata["resulting_status"].as_string()
+    (
+        completed_count,
+        auto_cleared_count,
+        needs_review_count,
+        failed_count,
+    ) = db.execute(
+        select(
+            func.count(AuditEvent.id),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (resulting_status == InvoiceStatus.CLEARED.value, 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (resulting_status == InvoiceStatus.NEEDS_REVIEW.value, 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (resulting_status == InvoiceStatus.FAILED.value, 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+        ).where(AuditEvent.event_type == "INVOICE_PROCESSING_COMPLETED")
+    ).one()
+
+    workflow_execution_id = AuditEvent.event_metadata[
+        "workflow_execution_id"
+    ].as_string()
+    started_runs = (
+        select(
+            AuditEvent.invoice_id.label("invoice_id"),
+            workflow_execution_id.label("workflow_execution_id"),
+            func.min(AuditEvent.created_at).label("started_at"),
+            func.count(AuditEvent.id).label("event_count"),
+        )
+        .where(
+            AuditEvent.event_type == "INVOICE_PROCESSING_STARTED",
+            workflow_execution_id.is_not(None),
+        )
+        .group_by(AuditEvent.invoice_id, workflow_execution_id)
+        .subquery()
+    )
+    completed_runs = (
+        select(
+            AuditEvent.invoice_id.label("invoice_id"),
+            workflow_execution_id.label("workflow_execution_id"),
+            func.min(AuditEvent.created_at).label("completed_at"),
+            func.count(AuditEvent.id).label("event_count"),
+        )
+        .where(
+            AuditEvent.event_type == "INVOICE_PROCESSING_COMPLETED",
+            workflow_execution_id.is_not(None),
+        )
+        .group_by(AuditEvent.invoice_id, workflow_execution_id)
+        .subquery()
+    )
+    paired_timestamps = db.execute(
+        select(started_runs.c.started_at, completed_runs.c.completed_at)
+        .join(
+            completed_runs,
+            and_(
+                completed_runs.c.invoice_id == started_runs.c.invoice_id,
+                completed_runs.c.workflow_execution_id
+                == started_runs.c.workflow_execution_id,
+            ),
+        )
+        .where(
+            started_runs.c.event_count == 1,
+            completed_runs.c.event_count == 1,
+            completed_runs.c.completed_at >= started_runs.c.started_at,
+        )
+    ).all()
+
+    average_processing_seconds = None
+    if paired_timestamps:
+        average_processing_seconds = sum(
+            (completed_at - started_at).total_seconds()
+            for started_at, completed_at in paired_timestamps
+        ) / len(paired_timestamps)
+
+    return AutomationMetrics(
+        completed_count=completed_count,
+        auto_cleared_count=auto_cleared_count,
+        needs_review_count=needs_review_count,
+        failed_count=failed_count,
+        auto_clear_rate=(auto_cleared_count / completed_count if completed_count else 0),
+        review_rate=(needs_review_count / completed_count if completed_count else 0),
+        failure_rate=(failed_count / completed_count if completed_count else 0),
+        average_processing_seconds=average_processing_seconds,
     )
 
 

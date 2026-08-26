@@ -4,7 +4,11 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.api.routes.dashboard import get_automation_summary, get_recent_processing
+from app.api.routes.dashboard import (
+    get_automation_metrics,
+    get_automation_summary,
+    get_recent_processing,
+)
 from app.db.session import Base
 from app.models import AuditEvent, ExceptionType, Invoice, InvoiceException, InvoiceStatus
 
@@ -205,3 +209,96 @@ def test_recent_processing_limits_results_to_ten(db: Session) -> None:
     assert [item.invoice_id for item in result] == [
         invoice.id for invoice in reversed(invoices[2:])
     ]
+
+
+def test_automation_metrics_returns_zeros_without_completions(db: Session) -> None:
+    result = get_automation_metrics(db)
+
+    assert result.model_dump() == {
+        "completed_count": 0,
+        "auto_cleared_count": 0,
+        "needs_review_count": 0,
+        "failed_count": 0,
+        "auto_clear_rate": 0.0,
+        "review_rate": 0.0,
+        "failure_rate": 0.0,
+        "average_processing_seconds": None,
+    }
+
+
+def test_automation_metrics_uses_historical_outcomes_and_paired_runs(
+    db: Session,
+) -> None:
+    invoice = Invoice(
+        file_path="uploads/historical.pdf",
+        status=InvoiceStatus.APPROVED,
+    )
+    db.add(invoice)
+    db.flush()
+    base_time = datetime(2026, 8, 25, 20, 0, tzinfo=UTC)
+
+    events: list[AuditEvent] = []
+    for index, (execution_id, resulting_status, duration_seconds) in enumerate(
+        [
+            ("execution-cleared", "CLEARED", 10),
+            ("execution-review", "NEEDS_REVIEW", 20),
+            ("execution-failed", "FAILED", 30),
+        ]
+    ):
+        started_at = base_time + timedelta(minutes=index * 10)
+        events.extend(
+            [
+                AuditEvent(
+                    invoice_id=invoice.id,
+                    event_type="INVOICE_PROCESSING_STARTED",
+                    message="Processing started.",
+                    event_metadata={"workflow_execution_id": execution_id},
+                    created_at=started_at,
+                ),
+                AuditEvent(
+                    invoice_id=invoice.id,
+                    event_type="INVOICE_PROCESSING_COMPLETED",
+                    message="Processing completed.",
+                    event_metadata={
+                        "workflow_execution_id": execution_id,
+                        "resulting_status": resulting_status,
+                    },
+                    created_at=started_at + timedelta(seconds=duration_seconds),
+                ),
+            ]
+        )
+
+    events.extend(
+        [
+            AuditEvent(
+                invoice_id=invoice.id,
+                event_type="INVOICE_PROCESSING_STARTED",
+                message="Processing started without completion.",
+                event_metadata={"workflow_execution_id": "unmatched-start"},
+                created_at=base_time + timedelta(hours=1),
+            ),
+            AuditEvent(
+                invoice_id=invoice.id,
+                event_type="INVOICE_PROCESSING_COMPLETED",
+                message="Processing completed without a matching start.",
+                event_metadata={
+                    "workflow_execution_id": "unmatched-completion",
+                    "resulting_status": "CLEARED",
+                },
+                created_at=base_time + timedelta(hours=2),
+            ),
+        ]
+    )
+    db.add_all(events)
+    db.commit()
+
+    result = get_automation_metrics(db)
+
+    assert result.completed_count == 4
+    assert result.auto_cleared_count == 2
+    assert result.needs_review_count == 1
+    assert result.failed_count == 1
+    assert result.auto_clear_rate == pytest.approx(0.5)
+    assert result.review_rate == pytest.approx(0.25)
+    assert result.failure_rate == pytest.approx(0.25)
+    assert result.average_processing_seconds == pytest.approx(20.0)
